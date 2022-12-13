@@ -77,8 +77,14 @@ class StableDiffusionModelHijack:
 
     embedding_db = modules.textual_inversion.textual_inversion.EmbeddingDatabase(cmd_opts.embeddings_dir)
 
-    def hijack(self, m):
+    def hijack(self, m, use_improved_clip=True):
+
         if type(m.cond_stage_model) == ldm.modules.encoders.modules.FrozenCLIPEmbedder:
+            if use_improved_clip:
+                from transformers import CLIPTextModel, CLIPTokenizer
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                m.cond_stage_model.transformer = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14-336").to(device)
+                m.cond_stage_model.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14-336")
             model_embeddings = m.cond_stage_model.transformer.text_model.embeddings
             model_embeddings.token_embedding = EmbeddingsWithFixes(model_embeddings.token_embedding, self)
             m.cond_stage_model = sd_hijack_clip.FrozenCLIPEmbedderWithCustomWords(m.cond_stage_model, self)
