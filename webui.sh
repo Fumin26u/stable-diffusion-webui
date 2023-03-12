@@ -6,19 +6,18 @@
 
 # If run from macOS, load defaults from webui-macos-env.sh
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    if [[ -f webui-macos-env.sh ]]
+    if [[ -f "$(dirname $0)/webui-macos-env.sh" ]]
         then
-        source ./webui-macos-env.sh
+        source "$(dirname $0)/webui-macos-env.sh"
     fi
 fi
 
 # Read variables from webui-user.sh
 # shellcheck source=/dev/null
-if [[ -f webui-user.sh ]]
+if [[ -f "$(dirname $0)/webui-user.sh" ]]
 then
-    source ./webui-user.sh
+    source "$(dirname $0)/webui-user.sh"
 fi
-
 # Set defaults
 # Install directory without trailing slash
 if [[ -z "${install_dir}" ]]
@@ -47,12 +46,12 @@ fi
 # python3 venv without trailing slash (defaults to ${install_dir}/${clone_dir}/venv)
 if [[ -z "${venv_dir}" ]]
 then
-    venv_dir="venv"
+    venv_dir="${install_dir}/${clone_dir}/venv"
 fi
 
 if [[ -z "${LAUNCH_SCRIPT}" ]]
 then
-    LAUNCH_SCRIPT="launch.py"
+    LAUNCH_SCRIPT="${install_dir}/${clone_dir}/launch.py"
 fi
 
 # this script cannot be run as root by default
@@ -104,6 +103,23 @@ then
 fi
 
 # Check prerequisites
+gpu_info=$(lspci 2>/dev/null | grep VGA)
+case "$gpu_info" in
+    *"Navi 1"*|*"Navi 2"*) export HSA_OVERRIDE_GFX_VERSION=10.3.0
+    ;;
+    *"Renoir"*) export HSA_OVERRIDE_GFX_VERSION=9.0.0
+        printf "\n%s\n" "${delimiter}"
+        printf "Experimental support for Renoir: make sure to have at least 4GB of VRAM and 10GB of RAM or enable cpu mode: --use-cpu all --no-half"
+        printf "\n%s\n" "${delimiter}"
+    ;;
+    *) 
+    ;;
+esac
+if echo "$gpu_info" | grep -q "AMD" && [[ -z "${TORCH_COMMAND}" ]]
+then
+    export TORCH_COMMAND="pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/rocm5.2"
+fi  
+
 for preq in "${GIT}" "${python_cmd}"
 do
     if ! hash "${preq}" &>/dev/null
@@ -123,22 +139,23 @@ then
     exit 1
 fi
 
-cd "${install_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/, aborting...\e[0m" "${install_dir}"; exit 1; }
-if [[ -d "${clone_dir}" ]]
+if [[ ! -d "${install_dir}/${clone_dir}" ]]
 then
-    cd "${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
-else
     printf "\n%s\n" "${delimiter}"
     printf "Clone stable-diffusion-webui"
     printf "\n%s\n" "${delimiter}"
-    "${GIT}" clone https://github.com/AUTOMATIC1111/stable-diffusion-webui.git "${clone_dir}"
-    cd "${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
+    mkdir -p "${install_dir}"
+    "${GIT}" clone https://github.com/AUTOMATIC1111/stable-diffusion-webui.git "${install_dir}/${clone_dir}"
 fi
 
 printf "\n%s\n" "${delimiter}"
 printf "Create and activate python venv"
 printf "\n%s\n" "${delimiter}"
-cd "${install_dir}"/"${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
+# Make venv_dir absolute
+if [[ "${venv_dir}" != /* ]]
+then
+    venv_dir="${install_dir}/${clone_dir}/${venv_dir}"
+fi
 if [[ ! -d "${venv_dir}" ]]
 then
     "${python_cmd}" -m venv "${venv_dir}"
@@ -164,16 +181,6 @@ then
 else
     printf "\n%s\n" "${delimiter}"
     printf "Launching launch.py..."
-    printf "\n%s\n" "${delimiter}"
-    gpu_info=$(lspci 2>/dev/null | grep VGA)
-    if echo "$gpu_info" | grep -q "AMD"
-    then
-        if [[ -z "${TORCH_COMMAND}" ]]
-        then	    
-            export TORCH_COMMAND="pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/rocm5.2"
-        fi
-        HSA_OVERRIDE_GFX_VERSION=10.3.0 exec "${python_cmd}" "${LAUNCH_SCRIPT}" "$@"
-    else
-        exec "${python_cmd}" "${LAUNCH_SCRIPT}" "$@"
-    fi
+    printf "\n%s\n" "${delimiter}"      
+    exec "${python_cmd}" "${LAUNCH_SCRIPT}" "$@"
 fi
